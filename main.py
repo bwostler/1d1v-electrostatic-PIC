@@ -58,6 +58,8 @@ def charge_deposition(sp: Species, grid: np.ndarray, charge_density: np.ndarray)
 
         # Fraction of distance from the left grid point
         delta_x = (xi - grid[idx_left]) / dx
+
+        # Deposit 1-delta_x to left grid node, the rest to right node
         weight_left = 1.0 - delta_x
         weight_right = delta_x
         
@@ -68,8 +70,8 @@ def field_solve(N_grid: int, dx: float, charge_density: np.ndarray) -> np.ndarra
     """Solve for the electric field on the grid by solving Poisson's equation"""
 
     # Set up the discrete Laplacian
-    main_diag = -2 * np.ones(N_grid)
-    off_diag = np.ones(N_grid - 1)
+    main_diag = -2*np.ones(N_grid)
+    off_diag = np.ones(N_grid-1)
     laplacian = diags([off_diag, main_diag, off_diag], offsets=[-1,0,1], shape=(N_grid, N_grid), format="lil")
     
     # Apply periodic boundary conditions
@@ -92,7 +94,7 @@ def field_solve(N_grid: int, dx: float, charge_density: np.ndarray) -> np.ndarra
     derivative = derivative.tocsr()
     
     # Compute electric field, E = -dphi/dx, using central differencing
-    Ex_grid = -(derivative @ phi) / (2 * dx)
+    Ex_grid = -(derivative @ phi) / (2*dx)
     
     return Ex_grid
 
@@ -133,11 +135,12 @@ class PICSimulation:
         self.N_cells = 100
         self.particles_per_cell = 100
         self.N_particles = int(self.particles_per_cell * self.N_cells)  # per species
+        print("N_particles per species:", self.N_particles)
         self.N_grid = self.N_cells  # for periodic BCs
         self.Lx = 5.0  # grid length
         self.grid = np.linspace(0.0, self.Lx, self.N_grid, endpoint=False)
         self.dx = self.grid[1] - self.grid[0]
-        self.N_timesteps = 1000
+        self.N_timesteps = 750
         self.dt = 1e-3
 
         # Electron species parameters
@@ -160,6 +163,9 @@ class PICSimulation:
         self.kinetic_energy_history = np.zeros(self.N_timesteps)
         self.field_energy_history = np.zeros(self.N_timesteps)
 
+        # For phase-space plotting
+        self.jitter = np.random.uniform(-0.05, 0.05, size=self.N_particles)
+
         self._validate_parameters()
         self._initialize_perturbations()
 
@@ -176,7 +182,7 @@ class PICSimulation:
         assert self.dx < 1.0, f"Grid spacing {self.dx} must be less than 1.0 to resolve Debeye length"
 
     def _initialize_perturbations(self):
-        """Introduces a small sinusoidal perturbation to the initial particle positions"""
+        """Introduces a small sinusoidal perturbation to the initial particle positions for two-stream instability"""
 
         delta = 0.01 * self.Lx
         kx = 2 * np.pi / self.Lx
@@ -186,29 +192,69 @@ class PICSimulation:
             sp.x %= self.Lx  # apply periodic BC
 
     def plot_phase_space(self, ts: int):
-
-        plt.figure()
-        plt.title(f"Timestep = {ts}")
+        # Create a figure with two rows (subplots)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+        
+        # Top subplot: Phase space (x vs. vx)
+        ax1.set_title(f"Time = {ts*self.dt:.2f} $\omega_{{ce}}^{{-1}}$\n\nPhase Space")
         for sp in self.species:
-            plt.scatter(sp.x, sp.vx, label=sp.name, s=0.5)
-        plt.legend(loc='upper right')
-        plt.xlabel('x')
-        plt.ylabel('vx')
-        plt.xlim([0, self.Lx])
-        plt.ylim([-10, 10])
-        filename = f"plots/phasespace/phasespace_ts{str(ts).zfill(int(np.log10(self.N_timesteps)) + 1)}.png"
-        plt.savefig(filename)
+            highlight_idx = len(sp.x) // 2
+            
+            # Create a mask for the normal points (all except the one to highlight)
+            normal_mask = np.ones(len(sp.x), dtype=bool)
+            normal_mask[highlight_idx] = False
+            ax1.scatter(sp.x[normal_mask], sp.vx[normal_mask], label=sp.name, s=0.1)
+            ax1.scatter(sp.x[highlight_idx], sp.vx[highlight_idx], 
+                        label=f"{sp.name} (tracked)", s=50, marker='x', color='red')
+        ax1.legend(loc='upper right')
+        ax1.set_xlabel('x')
+        ax1.set_ylabel('v$_x$')
+        ax1.set_xlim([0, self.Lx])
+        ax1.set_ylim([-10, 10])
+        
+        # Bottom subplot: 1D motion in position space
+        ax2.set_title("Position Space")
+        offsets = [1/2, -1/2]  # Vertical offsets for the different species
+        
+        for i, sp in enumerate(self.species):
+            # Create a slight vertical jitter for clarity
+            y_positions = np.full_like(sp.x, offsets[i]) + self.jitter
+            
+            # Determine the index to highlight, here chosen to be the middle particle
+            highlight_idx = len(sp.x) // 2
+            
+            # Create a mask for the normal points (all except the one to highlight)
+            normal_mask = np.ones(len(sp.x), dtype=bool)
+            normal_mask[highlight_idx] = False
+            
+            # Plot the normal points
+            ax2.scatter(sp.x[normal_mask], y_positions[normal_mask], 
+                        label=f"{sp.name} (all particles)", s=0.1)
+            # Plot the highlighted particle with a distinct marker and color
+            ax2.scatter(sp.x[highlight_idx], y_positions[highlight_idx], 
+                        label=f"{sp.name} (tracked)", s=50, marker='x', color='red')
+        
+        ax2.legend(loc='upper right')
+        ax2.set_xlabel('x')
+        ax2.set_yticks([])  # Remove y-axis ticks as the vertical position is arbitrary
+        ax2.set_xlim([0, self.Lx])
+        ax2.set_ylim([-1, 1])
+        
+        plt.tight_layout()
+        
+        filename = f"plots/phasespace/phasespace_ts{str(ts).zfill(int(np.log10(self.N_timesteps)) + 1)}.jpg"
+        plt.savefig(filename, dpi=200)
         plt.clf()
 
-    def run(self):
 
-        print("N_particles per species:", self.N_particles)
+    def run(self):
 
         for ts in range(self.N_timesteps):
             print(f"--- Timestep {ts} ---")
 
             # Optionally plot phase space
-            if ts % (self.N_timesteps // 10) == 0:
+            # if ts % (self.N_timesteps // 10) == 0:
+            if ts % 5 == 0:
                 self.plot_phase_space(ts)
 
             # TIME INTEGRATION: Kick (half step update for velocities)
@@ -218,7 +264,7 @@ class PICSimulation:
             # TIME INTEGRATION: Drift (update positions)
             for sp in self.species:
                 sp.x += sp.vhalfx * self.dt
-                sp.x %= self.Lx
+                sp.x %= self.Lx # periodic BCs
 
             # CHARGE DEPOSITION; deposit particle charge onto the grid
             charge_density = np.zeros_like(self.grid)
