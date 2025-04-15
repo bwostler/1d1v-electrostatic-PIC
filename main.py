@@ -6,9 +6,9 @@ from scipy.sparse.linalg import spsolve
 
 """
 Units used in the simulation:
-    [x] = electron Debeye length
-    [t] = electron plasma period
-    [v] = electron thermal speed
+    [x] = electron Debeye length, lambda_D
+    [t] = inverse (angular) plasma frequency w_p,e^-1
+    [v] = electron thermal speed, vth,e
     [density] = q_e * n_e,0
     [E] = m_e * v_th,e * w_p,e / q_e
 
@@ -143,20 +143,8 @@ class PICSimulation:
         self.N_timesteps = 750
         self.dt = 1e-3
 
-        # Electron species parameters
-        self.vdrift_e = 3.0
-        self.vth_e = 1.0
-
-        # Create two electron species with opposite drift
-        self.electrons1 = Species('e- 1', -1, 1.0, self.N_particles, self.vth_e, self.vdrift_e, self.Lx)
-        self.electrons2 = Species('e- 2', -1, 1.0, self.N_particles, self.vth_e, -self.vdrift_e, self.Lx)
-        self.species = [self.electrons1, self.electrons2]
-
         # Define the ion background charge density if needed
         self.charge_neutralizing_background = charge_neutralizing_background
-        if charge_neutralizing_background:
-            self.N_ions = sum(sp.N_particles for sp in self.species if sp.q < 0)
-            self.ion_charge_density = (-1) * self.electrons1.q * self.N_ions / self.Lx
 
         # Initialize energy history arrays
         self.total_energy_history = np.zeros(self.N_timesteps)
@@ -166,10 +154,34 @@ class PICSimulation:
         # For phase-space plotting
         self.jitter = np.random.uniform(-0.05, 0.05, size=self.N_particles)
 
-        self._validate_parameters()
-        self._initialize_perturbations()
+        self.create_initial_conditions()
+        self.validate_parameters()
 
-    def _validate_parameters(self):
+    def create_initial_conditions(self):
+        """Set initial conditions for the simulation"""
+        
+        # Electron species parameters
+        self.vdrift_e = 3.0
+        self.vth_e = 1.0
+
+        # Create two electron species with opposite drift
+        self.electrons1 = Species('e- 1', -1, 1.0, self.N_particles, self.vth_e, self.vdrift_e, self.Lx)
+        self.electrons2 = Species('e- 2', -1, 1.0, self.N_particles, self.vth_e, -self.vdrift_e, self.Lx)
+        self.species = [self.electrons1, self.electrons2]
+
+        if self.charge_neutralizing_background:
+            self.N_ions = sum(sp.N_particles for sp in self.species if sp.q < 0)
+            self.ion_charge_density = (-1) * self.electrons1.q * self.N_ions / self.Lx
+
+        # Sinusoidally perturb the electrons to kickstart the two-stream instability
+        delta = 0.01 * self.Lx
+        kx = 2 * np.pi / self.Lx
+
+        for sp in self.species:
+            sp.x += delta * np.sin(kx * sp.x)
+            sp.x %= self.Lx  # apply periodic BC
+
+    def validate_parameters(self):
         """Ensures simulation parameters are instantiated properly for numerical stability"""
 
         net_charge = sum(sp.q * sp.N_particles for sp in self.species)
@@ -181,22 +193,12 @@ class PICSimulation:
         assert self.dt < 0.1, f"Timestep {self.dt} must be less than 0.1 to resolve plasma period"
         assert self.dx < 1.0, f"Grid spacing {self.dx} must be less than 1.0 to resolve Debeye length"
 
-    def _initialize_perturbations(self):
-        """Introduces a small sinusoidal perturbation to the initial particle positions for two-stream instability"""
-
-        delta = 0.01 * self.Lx
-        kx = 2 * np.pi / self.Lx
-
-        for sp in self.species:
-            sp.x += delta * np.sin(kx * sp.x)
-            sp.x %= self.Lx  # apply periodic BC
-
     def plot_phase_space(self, ts: int):
         # Create a figure with two rows (subplots)
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
         
         # Top subplot: Phase space (x vs. vx)
-        ax1.set_title(f"Time = {ts*self.dt:.2f} $\omega_{{ce}}^{{-1}}$\n\nPhase Space")
+        ax1.set_title(f"Time = {ts*self.dt:.2f} $\omega_{{pe}}^{{-1}}$\n\nPhase Space")
         for sp in self.species:
             highlight_idx = len(sp.x) // 2
             
@@ -214,7 +216,7 @@ class PICSimulation:
         
         # Bottom subplot: 1D motion in position space
         ax2.set_title("Position Space")
-        offsets = [1/2, -1/2]  # Vertical offsets for the different species
+        offsets = [1/2, -1/2] # Vertical offsets for different species when plotting
         
         for i, sp in enumerate(self.species):
             # Create a slight vertical jitter for clarity
@@ -246,7 +248,6 @@ class PICSimulation:
         plt.savefig(filename, dpi=200)
         plt.clf()
 
-
     def run(self):
 
         for ts in range(self.N_timesteps):
@@ -254,8 +255,8 @@ class PICSimulation:
 
             # Optionally plot phase space
             # if ts % (self.N_timesteps // 10) == 0:
-            if ts % 5 == 0:
-                self.plot_phase_space(ts)
+            # if ts % 5 == 0:
+            #     self.plot_phase_space(ts)
 
             # TIME INTEGRATION: Kick (half step update for velocities)
             for sp in self.species:
