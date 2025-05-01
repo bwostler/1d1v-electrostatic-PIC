@@ -1,4 +1,3 @@
-
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.sparse import diags
@@ -29,7 +28,7 @@ class Species:
         vhalfx:         Half-step velocities for leapfrog integration
         Ex_particles:   Interpolated electric field at particle positions
     """
-    def __init__(self, name: str, q: int, m: float, N_particles: int,  vth: float, vdrift: float, Lx: float):
+    def __init__(self, name: str, q: int, m: float, N_particles: int, vth: float, vdrift: float, Lx: float):
         self.name = name
         self.q = q
         self.m = m
@@ -120,6 +119,7 @@ def field_interpolation(sp: Species, grid: np.ndarray, Ex_grid: np.ndarray) -> n
 
 def compute_energies(species: list, Ex_grid: np.ndarray, dx: float):
     """Compute kinetic, field, and total energies at each timestep"""
+    
     kinetic_energy = sum(0.5 * sp.m * np.sum(sp.vx**2) for sp in species)
     field_energy = 0.5 * np.sum(Ex_grid**2) * dx
     total_energy = kinetic_energy + field_energy
@@ -143,7 +143,7 @@ class PICSimulation:
         self.N_timesteps = 750
         self.dt = 1e-3
 
-        # Define the ion background charge density if needed
+        # Define the ion (singly ionized) background charge density if needed
         self.charge_neutralizing_background = charge_neutralizing_background
 
         # Initialize energy history arrays
@@ -185,7 +185,8 @@ class PICSimulation:
         """Ensures simulation parameters are instantiated properly for numerical stability"""
 
         net_charge = sum(sp.q * sp.N_particles for sp in self.species)
-        net_charge += int(self.charge_neutralizing_background) * self.N_ions
+        if self.charge_neutralizing_background:
+            net_charge += self.N_ions
         assert np.isclose(net_charge, 0), "Net charge must be zero for periodic Poisson solve"
 
         CFL = 1.0 / (np.abs(self.vdrift_e) + 3*self.vth_e)
@@ -194,10 +195,9 @@ class PICSimulation:
         assert self.dx < 1.0, f"Grid spacing {self.dx} must be less than 1.0 to resolve Debeye length"
 
     def plot_phase_space(self, ts: int):
-        # Create a figure with two rows (subplots)
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
         
-        # Top subplot: Phase space (x vs. vx)
+        # Top subplot: Phase space
         ax1.set_title(f"Time = {ts*self.dt:.2f} $\omega_{{pe}}^{{-1}}$\n\nPhase Space")
         for sp in self.species:
             highlight_idx = len(sp.x) // 2
@@ -214,12 +214,12 @@ class PICSimulation:
         ax1.set_xlim([0, self.Lx])
         ax1.set_ylim([-10, 10])
         
-        # Bottom subplot: 1D motion in position space
+        # Bottom subplot: Position space
         ax2.set_title("Position Space")
         offsets = [1/2, -1/2] # Vertical offsets for different species when plotting
         
         for i, sp in enumerate(self.species):
-            # Create a slight vertical jitter for clarity
+            # Create a slight vertical jitter for visual clarity
             y_positions = np.full_like(sp.x, offsets[i]) + self.jitter
             
             # Determine the index to highlight, here chosen to be the middle particle
@@ -232,6 +232,7 @@ class PICSimulation:
             # Plot the normal points
             ax2.scatter(sp.x[normal_mask], y_positions[normal_mask], 
                         label=f"{sp.name} (all particles)", s=0.1)
+            
             # Plot the highlighted particle with a distinct marker and color
             ax2.scatter(sp.x[highlight_idx], y_positions[highlight_idx], 
                         label=f"{sp.name} (tracked)", s=50, marker='x', color='red')
