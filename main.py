@@ -189,7 +189,10 @@ class PICSimulation:
             net_charge += self.N_ions
         assert np.isclose(net_charge, 0), "Net charge must be zero for periodic Poisson solve"
 
-        CFL = 1.0 / (np.abs(self.vdrift_e) + 3*self.vth_e)
+        alpha = 0.5 # CFL condition parameter
+        vmax = np.abs(self.vdrift_e) + 3*self.vth_e
+        CFL = alpha * self.dx / vmax
+
         assert self.dt < CFL, f"CFL condition dt = {self.dt} < {CFL} not satisfied"
         assert self.dt < 0.1, f"Timestep {self.dt} must be less than 0.1 to resolve plasma period"
         assert self.dx < 1.0, f"Grid spacing {self.dx} must be less than 1.0 to resolve Debeye length"
