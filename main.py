@@ -4,14 +4,23 @@ from scipy.sparse import diags
 from scipy.sparse.linalg import spsolve
 
 """
-Units used in the simulation:
-    [x] = electron Debeye length, lambda_D
-    [t] = inverse (angular) plasma frequency w_p,e^-1
-    [v] = electron thermal speed, vth,e
-    [density] = q_e * n_e,0
-    [E] = m_e * v_th,e * w_p,e / q_e
+Units used in the simulation (all defined at t=0):
 
-In these units, Gauss's law is \grad E = rho.
+    [x] = x_0 = electron Debeye length, lambda_{D,e}
+    [t] = t_0 = inverse plasma frequency w_{p,e}^{-1}
+    [q] = q_0 = electron charge, q_e
+    [m] = m_0 = electron mass, m_e
+    [v] = v_0 = x_0 / t_0 = electron thermal speed, v_{th,e}
+    [E] = E_0 = m_0 v_0 / (q_0 t_0) = m_e v_{th,e} / (q_e w_{p,e}^{-1})
+    [rho] = rho_0 = \epsilon_0 E_0 / x_0 = q_e n_e
+    [phi] = phi_0 = E_0 x_0 = m_e v_{th,e}^2 / q_e
+
+In non-dimensional form, the equations are:
+
+    1. \div E = rho
+    2. dv/dt = q/m E
+    3. dx/dt = v
+    4. E = -\grad phi
 """
 
 class Species:
